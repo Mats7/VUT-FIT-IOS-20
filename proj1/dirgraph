@@ -1,0 +1,251 @@
+#!/bin/sh
+POSIXLY_CORRECT=yes
+
+CURRENT_DIR="."
+
+re='^[0-9]+$'
+
+##############################################
+##############################################
+##############################################
+#rozdelenie velkosti podla zadania
+hist_fsize() {
+   FSIZE=$1
+   if [ "$FSIZE" -lt 100 ]; then
+      bytes=$((bytes+1));
+   elif [ "$FSIZE" -lt 1024 ]; then
+      kibone=$((kibone+1));
+   elif [ "$FSIZE" -lt 10240 ]; then
+      kibten=$((kibten+1));
+   elif [ "$FSIZE" -lt 102400 ]; then
+      kibhun=$((kibhun+1));
+   elif [ "$FSIZE" -lt 1048576 ]; then
+      mibone=$((mibone+1));
+   elif [ "$FSIZE" -lt 10485760 ]; then
+      mibten=$((mibten+1));
+   elif [ "$FSIZE" -lt 104857600 ]; then
+      mibhun=$((mibhun+1));
+   elif [ "$FSIZE" -lt 1073741824 ]; then
+      gibone=$((gibone+1));
+   elif [ "$FSIZE" -ge 1073741824 ]; then
+      gibmore=$((gibmore+1));
+   fi
+}
+
+#funkcia pre vykreslenie histogramu (aj s normalizaciou)
+render() {
+  num=$1
+#ak je zadany parameter n, tak sa kontroluje pritomnost terminalu
+#1 je terminal
+  if [ "$n" = "1" ]; then
+    if [ -t 1 ] ; then
+      cols=`tput cols`;
+      cols=`expr $cols - 13`
+    #inak je sirka 79
+    else
+      cols="79"
+    fi
+    #ak je sirka cols mensia, nez najdlhsi riadok, tak sa vsetky riadky upravia
+    if [ "$cols" -lt "$line_max" ]; then
+      percent=$(LANG=C awk "BEGIN {printf \"%.7f\",${line_max}/${cols}}")
+      num=$(LANG=C awk "BEGIN {printf \"%.7f\",${num}/${percent}}")
+      num=${num%.*}
+    fi
+  fi
+  #konecny vypis
+  a=0
+  while [ $a -lt $num ]
+  do
+     printf "#"
+     a=`expr $a + 1`
+  done
+  printf "\n"
+}
+
+#funkcia na ziskanie najdlhsieho riadku hist podla kt sa upravia ostatne riadky
+func_line_max() {
+  lengths=$@
+  for length in $lengths
+  do
+    if [ "$length" -gt "$line_max" ]; then
+      line_max=$length
+    fi
+  done
+}
+
+
+##############################################
+##############################################
+##############################################
+#ziskavanie argumentov
+#pouzivam while cyklus so switchom
+#na poradi vstupnych argumentov nezalezi
+if [ "$1" != "" ]; then
+   while [ "$1" != "" ]
+   do
+      case $1 in
+         -i)
+            shift
+            #ignorovany subor
+            FILE_ERE="$1"
+            if [ "$FILE_ERE" = "$CURRENT_DIR" ] || [ "$FILE_ERE" = "" ]; then
+              #ak je to aktualny adresar, tak sa nic nevykona
+              echo "ERROR: current dir cannot be excluded" >&2
+               exit 1
+            else
+               :
+            fi
+            shift
+            ;;
+         -n)
+            #normalizacia
+            n=1
+            shift
+            if [ "$1" == "" ]; then
+              DIR="."
+            fi
+            ;;
+         *)
+            if [ "$1" != "" ]; then
+               DIR=$1
+            else
+               DIR="."
+            fi
+            shift
+            ;;
+      esac
+   done
+else
+   DIR="." #ak nie je zadany argument, tak sa automaticky spusti nad aktualnym priecinkom
+fi
+
+if ! [ -d $DIR ]; then
+	echo "ERROR: dir is neither a file or non-valid" >&2
+	exit 1
+fi
+##############################################
+##############################################
+##############################################
+#inicializacia pocitacich premennych na 0
+DIR_COUNT=0
+FILE_COUNT=0
+bytes=0
+kibone=0
+kibten=0
+kibhun=0
+mibone=0
+mibten=0
+mibhun=0
+gibone=0
+gibmore=0
+
+
+##############################################
+##############################################
+##############################################
+if [ -z "$FILE_ERE" ]; then
+  #pocet vsetkych adresarov
+  DIR_COUNT=`find -L $DIR -type d 2>/dev/null | wc -l 2>/dev/null`
+  #nazvy vsetkych suborov
+  FILESALL=`find -L $DIR -type f -print 2>/dev/null`
+  #pocitadlo suborov
+  FILE_COUNT=0
+  
+  for file in $FILESALL
+  do
+    FILE_COUNT=$((FILE_COUNT+1));
+  done
+#ak je pritomny prepinac i, tak sa kontroluju priecinky a subory
+else
+  ALL=`find -L $DIR 2>/dev/null`
+  FILESALL=""
+  DIRECTORIESALL=""
+  #prechadzanie vsetkych objektov
+  for file in $ALL
+  do
+    root=0
+    #pomocna root sa nastavi na 1 ak je aktualne iterovany objekt zadanym priecinkom
+    if [ "$DIR" = "$file" ]; then
+      root=1;
+    fi
+    #pomocna temp je vysledkom invertovaneho porovnania prechadzaneho objektu s ignorovanym objektom
+    temp=`echo $file | sed 's#.*/##' | egrep -v "${FILE_ERE}" 2>/dev/null`
+    #ak sa objekt zhoduje, tak pokracuje dalej
+    if [ ! "x$temp" = "x" ]; then #v pripade prazdnej premennej nevypise chybu
+      OK=1 
+      FDIR=`dirname "${file}"` #zisti full path k objektu
+      FNAME=`basename "${file}"` #a cele meno
+      
+      #ak dir obsahuje bodku, tak je skryty a nezapocita sa do vysledku
+      for i in $(echo $FDIR | tr "/" "\n")
+      
+      do
+        temp2=`echo $i | egrep "${FILE_ERE}" 2>/dev/null`
+        
+        if [ "$i" = "$temp2" ] && [ ! "$i" = "." ]; then
+          OK=0
+          break;
+        fi
+      done
+      #ak je objekt viditelny pre usera, tak sa zapocita do vysledku
+      if [ "$OK" = "1" ]; then
+        
+        if [ -d "$file" ]; then
+          DIRECTORIESALL="$DIRECTORIESALL$file"
+          DIR_COUNT=$((DIR_COUNT+1));
+        
+        elif  [ -f "$file" ]; then
+          FILESALL="$FILESALL$file"
+          FILE_COUNT=$((FILE_COUNT+1));
+        fi
+      fi
+    #nakoniec nemozno ignorovat aktualny dir
+    elif [ "$root" = 1 ]; then
+      echo "ERROR: trying to exclude root dir" 1>&2;
+      exit 1;
+    fi
+  done
+fi
+
+##############################################
+##############################################
+##############################################
+echo "Root directory:" $DIR
+echo "Directories:" $DIR_COUNT
+echo "All files:" $FILE_COUNT
+echo "File size histogram:"
+
+#roztriedi subory podla velkosti cez funkciu hist_fsize
+for FILE in $FILESALL
+do
+  FSIZE=$(wc -c 2>/dev/null <"$FILE" 2>/dev/null)
+  if [ "$FSIZE" -eq "$FSIZE" ] 2>/dev/null; then
+    hist_fsize $FSIZE
+  fi
+done
+
+#zisti ktora kategoria ma najviac suborov pre upravenie dlzky histogramu
+if [ "$n" = "1" ]; then
+  line_max=0
+  func_line_max $bytes $kibone $kibten $kibhun $mibone $mibten $mibhun $gibone $gibmore
+fi
+
+#vysledny vystup na stdout
+printf "  <100 B  : "
+render "$bytes" "0"
+printf "  <1 KiB  : "
+render "$kibone" "0"
+printf "  <10 KiB : "
+render "$kibten" "0"
+printf "  <100 KiB: "
+render "$kibhun" "0"
+printf "  <1 MiB  : "
+render "$mibone" "0"
+printf "  <10 MiB : "
+render "$mibten" "0"
+printf "  <100 MiB: "
+render "$mibhun" "0"
+printf "  <1 GiB  : "
+render "$gibone" "0"
+printf "  >=1 GiB : "
+render "$gibmore" "0"
